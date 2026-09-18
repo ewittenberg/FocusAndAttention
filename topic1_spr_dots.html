@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Self-Paced Reading with Dot Interference</title>
+<style>
+  :root{
+    --bg:#faf9f6; --panel:#ffffff; --text:#1a1a1a; --muted:#6a7179;
+    --accent:#8a2f2f; --accent-bg:#f3e3e0; --border:#e3e6e4; --good:#2f6b45;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#15181a; --panel:#1e2225; --text:#eef0f1; --muted:#a3aab0;
+      --accent:#e08a8a; --accent-bg:#3a2323; --border:#33393d; --good:#7fd39a;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#15181a; --panel:#1e2225; --text:#eef0f1; --muted:#a3aab0;
+    --accent:#e08a8a; --accent-bg:#3a2323; --border:#33393d; --good:#7fd39a;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:Georgia, 'Source Serif 4', serif;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center;
+    padding:32px 16px 64px;
+  }
+  .wrap{ width:100%; max-width:680px; }
+  h1{ font-size:26px; font-weight:600; margin:0 0 4px; }
+  .sub{ color:var(--muted); font-family:Arial, sans-serif; font-size:14px; margin-bottom:24px; }
+  .panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:28px; margin-bottom:20px;
+  }
+  .stage{
+    min-height:220px; display:flex; align-items:center; justify-content:center;
+    text-align:center; font-size:20px; line-height:1.5; flex-direction:column; gap:16px;
+  }
+  .word{ font-size:40px; font-weight:600; min-height:56px; }
+  .dot{
+    width:44px; height:44px; border-radius:50%; background:var(--accent);
+  }
+  .hint{ font-family:Arial, sans-serif; font-size:13px; color:var(--muted); }
+  button{
+    font-family:Arial, sans-serif; font-size:15px; font-weight:600;
+    background:var(--accent); color:#fff; border:none; border-radius:8px;
+    padding:12px 22px; cursor:pointer;
+  }
+  button.secondary{ background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  button:disabled{ opacity:0.4; cursor:default; }
+  .quiz-q{ margin-bottom:18px; font-family:Arial, sans-serif; }
+  .quiz-q p{ font-weight:600; margin:0 0 8px; }
+  label{ display:block; font-size:15px; margin:4px 0; cursor:pointer; }
+  table{ width:100%; border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px; }
+  th,td{ text-align:left; padding:8px 6px; border-bottom:1px solid var(--border); }
+  th{ color:var(--muted); font-weight:600; }
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; background:var(--accent-bg); color:var(--accent); font-size:12px; font-family:Arial, sans-serif; }
+  .row{ display:flex; gap:12px; flex-wrap:wrap; }
+  .stat{ flex:1; min-width:140px; background:var(--accent-bg); border-radius:10px; padding:14px; font-family:Arial, sans-serif; }
+  .stat .n{ font-size:24px; font-weight:700; color:var(--accent); }
+  .stat .l{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .good-text{ color:var(--good); font-weight:700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Self-Paced Reading with Dot Interference</h1>
+  <div class="sub">Topic 1 — Attention, Focus, and Cognitive Control</div>
+  <div id="app"></div>
+</div>
+
+<script>
+const app = document.getElementById('app');
+
+const passageA = { // baseline, no dots
+  name: "Passage A (no interruptions)",
+  words: "Honeybees communicate the location of food sources through a movement known as the waggle dance. A returning forager moves in a figure-eight pattern inside the dark hive, and the angle of the straight middle run relative to gravity indicates the direction of the flowers relative to the sun. The duration of that run signals distance, and nearby bees follow along, translating the dance into a flight path before they even leave the hive.".split(" "),
+  dotPositions: [],
+  questions: [
+    { q: "What is the name of the movement bees use to signal a food source's location?",
+      options: ["Waggle dance","Wing hum","Spiral spin","Tail flick"], correct: 0 },
+    { q: "What does the angle of the straight run indicate?",
+      options: ["Distance","Direction relative to the sun","Time of day","Flower color"], correct: 1 },
+    { q: "What does the duration of the run signal?",
+      options: ["Direction","Distance","Nectar quality","Hive temperature"], correct: 1 },
+  ]
+};
+
+const passageB = { // interference, dots
+  name: "Passage B (with dot interference)",
+  words: "Johannes Gutenberg introduced movable metal type to Europe in the fourteen forties, allowing individual letters to be arranged, inked, and reused for different pages. Before this, most books were copied by hand or printed from carved wooden blocks, a slow and expensive process. Gutenberg's press combined a wine press mechanism with durable metal letters, and within decades printing workshops had spread across the continent, dramatically lowering the cost of books and accelerating the spread of new ideas.".split(" "),
+  questions: [
+    { q: "In which decade did Gutenberg introduce movable metal type to Europe?",
+      options: ["1400s","1440s","1500s","1350s"], correct: 1 },
+    { q: "What mechanism did Gutenberg's press combine with metal letters?",
+      options: ["A wine press","A water wheel","A loom","A grinding mill"], correct: 0 },
+    { q: "What was one effect of the printing press spreading across the continent?",
+      options: ["Books became more expensive","Lowered the cost of books","Fewer new ideas spread","Hand-copying increased"], correct: 1 },
+  ]
+};
+// Build dot positions for passage B: ~1 in 5 words, min gap 3, never first/last 2 words
+(function(){
+  const n = passageB.words.length;
+  const positions = [];
+  let lastDot = -10;
+  for (let i = 3; i < n - 2; i++){
+    if (i - lastDot >= 3 && Math.random() < 0.22){
+      positions.push(i);
+      lastDot = i;
+    }
+  }
+  passageB.dotPositions = positions;
+})();
+
+let state = {
+  phase: 'intro', // intro -> reading_A -> quiz_A -> reading_B -> quiz_B -> summary
+  data: { A: {rts:[], dot:[]}, B: {rts:[], dot:[]} },
+  quizScores: { A: 0, B: 0 },
+};
+
+function render(){
+  if (state.phase === 'intro') return renderIntro();
+  if (state.phase === 'reading_A') return renderReading('A', passageA, 'reading_B_intro');
+  if (state.phase === 'reading_B_intro') return renderBIntro();
+  if (state.phase === 'reading_B') return renderReading('B', passageB, 'summary');
+  if (state.phase === 'summary') return renderSummary();
+}
+
+function renderIntro(){
+  app.innerHTML = `
+    <div class="panel">
+      <p>You'll read two short passages, one word at a time. Press <b>SPACE</b> to reveal the next word.</p>
+      <p>Sometimes, instead of the next word, a red <span style="color:var(--accent);font-weight:700;">dot</span> will appear. When you see it, press <b>F</b> as fast as you can to clear it and keep reading.</p>
+      <p>After each passage, answer three quick questions.</p>
+      <button onclick="startPhase('reading_A')">Start Passage A</button>
+    </div>`;
+}
+
+function renderBIntro(){
+  app.innerHTML = `
+    <div class="panel">
+      <p>Nice work. Now Passage B — same task, but this time dots will occasionally interrupt your reading.</p>
+      <button onclick="startPhase('reading_B')">Start Passage B</button>
+    </div>`;
+}
+
+function startPhase(p){ state.phase = p; render(); if (p==='reading_A' || p==='reading_B') runReading(p==='reading_A'?'A':'B'); }
+
+function renderReading(key, passage, nextPhase){
+  app.innerHTML = `
+    <div class="panel">
+      <div class="hint">${passage.name} — press SPACE to continue, F when you see a dot</div>
+      <div class="stage" id="stage"><div class="word" id="wordbox">Get ready…</div></div>
+    </div>`;
+}
+
+function runReading(key){
+  const passage = key === 'A' ? passageA : passageB;
+  const dotSet = new Set(passage.dotPositions);
+  let idx = 0;
+  let wordShown = 0;
+  let waitingForDot = false;
+  let dotShown = 0;
+  let dotTimeout = null;
+  const wordbox = () => document.getElementById('wordbox');
+
+  function showWord(){
+    if (idx >= passage.words.length){
+      finishReading(key);
+      return;
+    }
+    if (dotSet.has(idx) && !waitingForDot){
+      waitingForDot = true;
+      dotShown = performance.now();
+      if (wordbox()) wordbox().outerHTML = '<div class="dot" id="wordbox"></div>';
+      dotTimeout = setTimeout(() => {
+        if (!waitingForDot) return;
+        state.data[key].dot.push({ idx, rt: 2000, hit: false });
+        waitingForDot = false;
+        dotSet.delete(idx);
+        showWord();
+      }, 2000);
+      return;
+    }
+    waitingForDot = false;
+    wordShown = performance.now();
+    if (wordbox()) wordbox().outerHTML = `<div class="word" id="wordbox">${passage.words[idx]}</div>`;
+  }
+
+  function onKey(e){
+    if (state.phase !== (key==='A'?'reading_A':'reading_B')) return;
+    if (waitingForDot){
+      if (e.key.toLowerCase() === 'f'){
+        clearTimeout(dotTimeout);
+        const dotRT = performance.now() - dotShown;
+        state.data[key].dot.push({ idx, rt: Math.round(dotRT), hit: true });
+        waitingForDot = false;
+        dotSet.delete(idx); // don't re-trigger the same dot
+        showWord(); // show the word that was behind the dot
+      }
+      return;
+    }
+    if (e.code === 'Space' || e.key === ' '){
+      e.preventDefault();
+      if (wordShown){
+        const rt = performance.now() - wordShown;
+        const afterDot = idx > 0 && dotSet.has(idx-1);
+        state.data[key].rts.push({ idx, rt: Math.round(rt), afterDot });
+      }
+      idx++;
+      showWord();
+    }
+  }
+  document.addEventListener('keydown', onKey);
+  // also allow tap/click to advance (mobile-friendly), and a button for dot
+  const stage = document.getElementById('stage');
+  stage.addEventListener('click', () => {
+    if (waitingForDot){ onKey({key:'f'}); }
+    else { onKey({code:'Space', key:' ', preventDefault:()=>{}}); }
+  });
+  setTimeout(showWord, 500);
+
+  function finishReading(k){
+    document.removeEventListener('keydown', onKey);
+    renderQuiz(k);
+  }
+}
+
+function renderQuiz(key){
+  const passage = key === 'A' ? passageA : passageB;
+  app.innerHTML = `
+    <div class="panel">
+      <h3 style="font-family:Arial,sans-serif;margin-top:0;">Quick check</h3>
+      <form id="quizform">
+        ${passage.questions.map((q,qi)=>`
+          <div class="quiz-q">
+            <p>${qi+1}. ${q.q}</p>
+            ${q.options.map((o,oi)=>`
+              <label><input type="radio" name="q${qi}" value="${oi}" required> ${o}</label>
+            `).join('')}
+          </div>`).join('')}
+        <button type="submit">Submit answers</button>
+      </form>
+    </div>`;
+  document.getElementById('quizform').addEventListener('submit', (e)=>{
+    e.preventDefault();
+    let score = 0;
+    passage.questions.forEach((q,qi)=>{
+      const val = document.querySelector(`input[name="q${qi}"]:checked`);
+      if (val && parseInt(val.value) === q.correct) score++;
+    });
+    state.quizScores[key] = score;
+    if (key === 'A'){ startPhase('reading_B_intro'); }
+    else { startPhase('summary'); }
+  });
+}
+
+function avg(arr){ return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0; }
+
+function renderSummary(){
+  const A = state.data.A, B = state.data.B;
+  const avgA = avg(A.rts.map(r=>r.rt));
+  const bBaseline = B.rts.filter(r=>!r.afterDot).map(r=>r.rt);
+  const bAfterDot = B.rts.filter(r=>r.afterDot).map(r=>r.rt);
+  const avgBBase = avg(bBaseline);
+  const avgBAfter = avg(bAfterDot);
+  const dotHits = B.dot.length;
+  const dotAttempts = passageB.dotPositions.length;
+  const avgDotRT = avg(B.dot.map(d=>d.rt));
+  const recoveryCost = avgBAfter - avgBBase;
+
+  app.innerHTML = `
+    <div class="panel">
+      <h3 style="font-family:Arial,sans-serif;margin-top:0;">Your results</h3>
+      <div class="row">
+        <div class="stat"><div class="n">${Math.round(avgA)} ms</div><div class="l">Avg. word RT — Passage A (baseline)</div></div>
+        <div class="stat"><div class="n">${Math.round(avgBBase)} ms</div><div class="l">Avg. word RT — Passage B, normal words</div></div>
+        <div class="stat"><div class="n">${Math.round(avgBAfter)} ms</div><div class="l">Avg. word RT — word right after a dot</div></div>
+        <div class="stat"><div class="n" style="${recoveryCost>0?'':'color:var(--good)'}">${recoveryCost>=0?'+':''}${Math.round(recoveryCost)} ms</div><div class="l">Recovery cost (after-dot minus baseline)</div></div>
+        <div class="stat"><div class="n">${dotHits}/${dotAttempts}</div><div class="l">Dots cleared</div></div>
+        <div class="stat"><div class="n">${Math.round(avgDotRT)||'—'} ms</div><div class="l">Avg. dot response time</div></div>
+        <div class="stat"><div class="n">${state.quizScores.A}/3</div><div class="l">Comprehension — Passage A</div></div>
+        <div class="stat"><div class="n">${state.quizScores.B}/3</div><div class="l">Comprehension — Passage B</div></div>
+      </div>
+      <p class="hint" style="margin-top:18px;">Compare your "recovery cost" number with classmates: does reading stay slow only on the interrupted word, or for a few words afterward?</p>
+      <button class="secondary" onclick="location.reload()">Run again</button>
+    </div>`;
+}
+
+render();
+</script>
+</body>
+</html>
