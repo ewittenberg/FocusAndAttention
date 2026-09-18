@@ -162,7 +162,7 @@ if (isConfigured()){
 }
 
 let state = {
-  phase: 'name',
+  phase: (params.get('view') === 'results') ? 'teacher' : 'name',
   nickname: '',
   round: 0,
   results: [],
@@ -177,9 +177,21 @@ function escapeHtml(s){
 }
 
 function render(){
+  if (state.phase === 'teacher') return renderTeacherDashboard();
   if (state.phase === 'name') return renderName();
   if (state.phase === 'reading') return renderRound();
   if (state.phase === 'done') return renderDone();
+}
+
+function renderTeacherDashboard(){
+  app.innerHTML = `
+    <div class="notice">Room: <span class="room-tag">${escapeHtml(roomCode)}</span> — teacher results view (no task, just live data)</div>
+    <div class="panel" id="liveResultsPanel">
+      <h3 style="margin-top:0;">Live class results — Room ${escapeHtml(roomCode)}</h3>
+      <div id="liveAgg"></div>
+      <div id="liveResultsBody" style="margin-top:14px;">Connecting…</div>
+    </div>`;
+  subscribeLive();
 }
 
 function setupBanner(){
