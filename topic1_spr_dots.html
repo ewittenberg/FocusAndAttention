@@ -238,7 +238,8 @@ function renderReading(key, passage, nextPhase){
 
 function runReading(key){
   const passage = key === 'A' ? passageA : passageB;
-  const dotSet = new Set(passage.dotPositions);
+  const dotPositionsOriginal = new Set(passage.dotPositions); // never mutated — used for the "was this word after a dot?" check
+  const dotSet = new Set(passage.dotPositions); // mutated to prevent re-triggering the same dot
   let idx = 0;
   let wordShown = 0;
   let waitingForDot = false;
@@ -286,7 +287,7 @@ function runReading(key){
       e.preventDefault();
       if (wordShown){
         const rt = performance.now() - wordShown;
-        const afterDot = idx > 0 && dotSet.has(idx-1);
+        const afterDot = idx > 0 && dotPositionsOriginal.has(idx-1);
         state.data[key].rts.push({ idx, rt: Math.round(rt), afterDot });
       }
       idx++;
