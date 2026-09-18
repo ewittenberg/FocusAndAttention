@@ -41,6 +41,9 @@
   .dot{
     width:44px; height:44px; border-radius:50%; background:var(--accent);
   }
+  .dot.blue{
+    background:#2f5d8a;
+  }
   .hint{ font-family:Arial, sans-serif; font-size:13px; color:var(--muted); }
   button{
     font-family:Arial, sans-serif; font-size:15px; font-weight:600;
@@ -154,18 +157,22 @@ const passageB = { // interference, dots
       options: ["More workshops raised costs due to demand","Workshops spreading across the continent lowered the cost of books","Costs stayed the same regardless of workshops","Costs dropped only after wooden block printing was banned"], correct: 1 },
   ]
 };
-// Build dot positions for passage B: ~1 in 5 words, min gap 3, never first/last 2 words
+// Build dot positions for passage B: ~1 in 5 words, min gap 3, never first/last 2 words.
+// Each dot is randomly RED (respond) or BLUE (withhold response) — a go/no-go twist.
 (function(){
   const n = passageB.words.length;
   const positions = [];
+  const colors = {};
   let lastDot = -10;
   for (let i = 3; i < n - 2; i++){
     if (i - lastDot >= 3 && Math.random() < 0.22){
       positions.push(i);
+      colors[i] = Math.random() < 0.5 ? 'red' : 'blue';
       lastDot = i;
     }
   }
   passageB.dotPositions = positions;
+  passageB.dotColors = colors;
 })();
 
 if (isConfigured()){
@@ -212,7 +219,9 @@ function renderIntro(){
   app.innerHTML = `
     <div class="panel">
       <p>You'll read two short passages, one word at a time. Press <b>SPACE</b> to reveal the next word.</p>
-      <p>Sometimes, instead of the next word, a red <span style="color:var(--accent);font-weight:700;">dot</span> will appear. When you see it, press <b>F</b> as fast as you can to clear it and keep reading.</p>
+      <p>Sometimes, instead of the next word, a dot will appear:</p>
+      <p>&bull; <span style="color:var(--accent);font-weight:700;">Red dot</span> — press <b>F</b> as fast as you can to clear it.<br>
+         &bull; <span style="color:#2f5d8a;font-weight:700;">Blue dot</span> — do <b>nothing</b>. Just wait for it to pass. Pressing F on a blue dot counts as a mistake.</p>
       <p>After each passage, answer three quick questions.</p>
       <button onclick="startPhase('reading_A')">Start Passage A</button>
     </div>`;
@@ -238,11 +247,14 @@ function renderReading(key, passage, nextPhase){
 
 function runReading(key){
   const passage = key === 'A' ? passageA : passageB;
-  const dotPositionsOriginal = new Set(passage.dotPositions); // never mutated — used for the "was this word after a dot?" check
+  const dotPositionsOriginal = new Set(passage.dotPositions); // never mutated — used for the "was this word behind a dot?" check
   const dotSet = new Set(passage.dotPositions); // mutated to prevent re-triggering the same dot
+  const dotColors = passage.dotColors || {};
   let idx = 0;
   let wordShown = 0;
   let waitingForDot = false;
+  let currentDotColor = null;
+  let blueAlarmed = false; // did the user (incorrectly) press F during a blue dot's window?
   let dotShown = 0;
   let dotTimeout = null;
   const wordbox = () => document.getElementById('wordbox');
@@ -254,15 +266,22 @@ function runReading(key){
     }
     if (dotSet.has(idx) && !waitingForDot){
       waitingForDot = true;
+      currentDotColor = dotColors[idx] || 'red';
+      blueAlarmed = false;
       dotShown = performance.now();
-      if (wordbox()) wordbox().outerHTML = '<div class="dot" id="wordbox"></div>';
+      if (wordbox()) wordbox().outerHTML = `<div class="dot${currentDotColor==='blue'?' blue':''}" id="wordbox"></div>`;
+      const duration = currentDotColor === 'red' ? 2000 : 1200;
       dotTimeout = setTimeout(() => {
         if (!waitingForDot) return;
-        state.data[key].dot.push({ idx, rt: 2000, hit: false });
+        if (currentDotColor === 'red'){
+          state.data[key].dot.push({ idx, color: 'red', rt: 2000, hit: false });
+        } else {
+          state.data[key].dot.push({ idx, color: 'blue', rt: duration, hit: !blueAlarmed, falseAlarm: blueAlarmed });
+        }
         waitingForDot = false;
         dotSet.delete(idx);
         showWord();
-      }, 2000);
+      }, duration);
       return;
     }
     waitingForDot = false;
@@ -274,12 +293,19 @@ function runReading(key){
     if (state.phase !== (key==='A'?'reading_A':'reading_B')) return;
     if (waitingForDot){
       if (e.key.toLowerCase() === 'f'){
-        clearTimeout(dotTimeout);
-        const dotRT = performance.now() - dotShown;
-        state.data[key].dot.push({ idx, rt: Math.round(dotRT), hit: true });
-        waitingForDot = false;
-        dotSet.delete(idx); // don't re-trigger the same dot
-        showWord(); // show the word that was behind the dot
+        if (currentDotColor === 'red'){
+          clearTimeout(dotTimeout);
+          const dotRT = performance.now() - dotShown;
+          state.data[key].dot.push({ idx, color: 'red', rt: Math.round(dotRT), hit: true });
+          waitingForDot = false;
+          dotSet.delete(idx); // don't re-trigger the same dot
+          showWord(); // show the word that was behind the dot
+        } else {
+          // Blue dot: pressing F is a mistake. Record it, but let the dot's
+          // timer run out naturally rather than ending the trial early —
+          // this keeps timing comparable across red and blue trials.
+          blueAlarmed = true;
+        }
       }
       return;
     }
@@ -287,7 +313,7 @@ function runReading(key){
       e.preventDefault();
       if (wordShown){
         const rt = performance.now() - wordShown;
-        const afterDot = idx > 0 && dotPositionsOriginal.has(idx-1);
+        const afterDot = dotPositionsOriginal.has(idx); // this word was the one revealed right after a dot
         state.data[key].rts.push({ idx, rt: Math.round(rt), afterDot });
       }
       idx++;
@@ -347,10 +373,16 @@ function renderSummary(){
   const bAfterDot = B.rts.filter(r=>r.afterDot).map(r=>r.rt);
   const avgBBase = avg(bBaseline);
   const avgBAfter = avg(bAfterDot);
-  const dotHits = B.dot.length;
-  const dotAttempts = passageB.dotPositions.length;
-  const avgDotRT = avg(B.dot.map(d=>d.rt));
   const recoveryCost = avgBAfter - avgBBase;
+
+  const redEntries = B.dot.filter(d=>d.color==='red');
+  const blueEntries = B.dot.filter(d=>d.color==='blue');
+  const redHits = redEntries.filter(d=>d.hit).length;
+  const redTotal = redEntries.length;
+  const avgRedRT = avg(redEntries.filter(d=>d.hit).map(d=>d.rt));
+  const blueFalseAlarms = blueEntries.filter(d=>d.falseAlarm).length;
+  const blueTotal = blueEntries.length;
+  const blueCorrect = blueTotal - blueFalseAlarms;
 
   app.innerHTML = `
     <div class="panel">
@@ -360,12 +392,14 @@ function renderSummary(){
         <div class="stat"><div class="n">${Math.round(avgBBase)} ms</div><div class="l">Avg. word RT — Passage B, normal words</div></div>
         <div class="stat"><div class="n">${Math.round(avgBAfter)} ms</div><div class="l">Avg. word RT — word right after a dot</div></div>
         <div class="stat"><div class="n" style="${recoveryCost>0?'':'color:var(--good)'}">${recoveryCost>=0?'+':''}${Math.round(recoveryCost)} ms</div><div class="l">Recovery cost (after-dot minus baseline)</div></div>
-        <div class="stat"><div class="n">${dotHits}/${dotAttempts}</div><div class="l">Dots cleared</div></div>
-        <div class="stat"><div class="n">${Math.round(avgDotRT)||'—'} ms</div><div class="l">Avg. dot response time</div></div>
+        <div class="stat"><div class="n">${redHits}/${redTotal}</div><div class="l">Red dots cleared</div></div>
+        <div class="stat"><div class="n">${Math.round(avgRedRT)||'—'} ms</div><div class="l">Avg. red dot response time</div></div>
+        <div class="stat"><div class="n">${blueCorrect}/${blueTotal}</div><div class="l">Blue dots correctly ignored</div></div>
+        <div class="stat"><div class="n" style="${blueFalseAlarms>0?'':'color:var(--good)'}">${blueFalseAlarms}</div><div class="l">False alarms (pressed on blue)</div></div>
         <div class="stat"><div class="n">${state.quizScores.A}/3</div><div class="l">Comprehension — Passage A</div></div>
         <div class="stat"><div class="n">${state.quizScores.B}/3</div><div class="l">Comprehension — Passage B</div></div>
       </div>
-      <p class="hint" style="margin-top:18px;">Compare your "recovery cost" number with classmates: does reading stay slow only on the interrupted word, or for a few words afterward?</p>
+      <p class="hint" style="margin-top:18px;">Compare your "recovery cost" number with classmates: does reading stay slow only on the interrupted word, or for a few words afterward? And did false alarms on blue dots increase along with faster red-dot responses — a speed/accuracy trade-off?</p>
       <button class="secondary" onclick="location.reload()">Run again</button>
     </div>
     <div class="panel" id="classPanel">
@@ -374,7 +408,11 @@ function renderSummary(){
       <div id="classBody" style="margin-top:14px;">Connecting…</div>
     </div>`;
 
-  submitAndSubscribe({ avgBBase, avgBAfter, recoveryCost, dotHits, dotAttempts, quizA: state.quizScores.A, quizB: state.quizScores.B });
+  submitAndSubscribe({
+    avgBBase, avgBAfter, recoveryCost,
+    redHits, redTotal, blueFalseAlarms, blueTotal,
+    quizA: state.quizScores.A, quizB: state.quizScores.B,
+  });
 }
 
 async function submitAndSubscribe(mine){
@@ -390,8 +428,10 @@ async function submitAndSubscribe(mine){
       avgBaselineRT: Math.round(mine.avgBBase),
       avgAfterDotRT: Math.round(mine.avgBAfter),
       recoveryCost: Math.round(mine.recoveryCost),
-      dotHits: mine.dotHits,
-      dotAttempts: mine.dotAttempts,
+      redHits: mine.redHits,
+      redTotal: mine.redTotal,
+      blueFalseAlarms: mine.blueFalseAlarms,
+      blueTotal: mine.blueTotal,
       quizA: mine.quizA,
       quizB: mine.quizB,
       timestamp: firebase.database.ServerValue.TIMESTAMP,
